@@ -1,0 +1,9 @@
+node_modules
+.next
+.env
+.env.local
+*.json.key
+*-key.json
+credentials*.json
+evidencias/*.private.*
+tsconfig.tsbuildinfo
