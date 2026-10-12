@@ -1,6 +1,6 @@
 import { randomUUID } from "crypto";
 import { isAuthorized } from "@/lib/auth";
-import { bucket, isValidId, objectName } from "@/lib/storage";
+import { bucket, isValidId, objectName, PREFIX } from "@/lib/storage";
 
 export const dynamic = "force-dynamic";
 
@@ -30,10 +30,15 @@ export async function POST(req: Request) {
   }
 }
 
-/** GET ?id=<uuid>: recupera un comprobante a través del backend. */
+/**
+ * GET sin parámetros: lista los comprobantes del bucket (los 20 más recientes).
+ * GET ?id=<uuid>: recupera un comprobante a través del backend.
+ */
 export async function GET(req: Request) {
   if (!isAuthorized(req)) return unauthorized();
-  const id = new URL(req.url).searchParams.get("id") ?? "";
+  const parametro = new URL(req.url).searchParams.get("id");
+  if (parametro === null) return listar();
+  const id = parametro;
   if (!isValidId(id)) return Response.json({ error: "Identificador inválido" }, { status: 400 });
   try {
     const file = bucket().file(objectName(id));
@@ -44,5 +49,26 @@ export async function GET(req: Request) {
   } catch (err) {
     console.error(JSON.stringify({ severity: "ERROR", message: "fallo al leer comprobante", detalle: String(err) }));
     return Response.json({ ok: false, error: "No se pudo leer de Cloud Storage" }, { status: 500 });
+  }
+}
+
+// Límite de la demo: se leen hasta 100 objetos y se muestran los 20 más recientes.
+async function listar() {
+  try {
+    const [archivos] = await bucket().getFiles({ prefix: PREFIX, maxResults: 100 });
+    const items = archivos
+      .filter((f) => f.name.endsWith(".json"))
+      .map((f) => ({
+        id: f.name.slice(PREFIX.length, -".json".length),
+        objeto: f.name,
+        creado: String(f.metadata.timeCreated ?? ""),
+        bytes: Number(f.metadata.size ?? 0),
+      }))
+      .sort((a, b) => b.creado.localeCompare(a.creado))
+      .slice(0, 20);
+    return Response.json({ ok: true, items });
+  } catch (err) {
+    console.error(JSON.stringify({ severity: "ERROR", message: "fallo al listar comprobantes", detalle: String(err) }));
+    return Response.json({ ok: false, error: "No se pudo listar Cloud Storage" }, { status: 500 });
   }
 }

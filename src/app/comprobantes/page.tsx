@@ -1,67 +1,126 @@
 "use client";
 
 import { useState } from "react";
+import { useToken } from "../token-context";
+import Recibo, { Comprobante, fechaGT } from "./recibo";
 
-type Estado =
-  | { tipo: "inactivo" }
-  | { tipo: "cargando" }
-  | { tipo: "ok"; objeto: string; cuerpo: unknown }
-  | { tipo: "error"; mensaje: string };
+type Item = { id: string; objeto: string; creado: string; bytes: number };
+type Detalle = { objeto: string; comprobante: Comprobante };
 
 export default function Comprobantes() {
-  const [token, setToken] = useState(""); // solo en memoria; no se guarda en el navegador
-  const [estado, setEstado] = useState<Estado>({ tipo: "inactivo" });
+  const { token } = useToken();
+  const [items, setItems] = useState<Item[] | null>(null);
+  const [detalle, setDetalle] = useState<Detalle | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [ocupado, setOcupado] = useState(false);
 
-  async function crear() {
-    setEstado({ tipo: "cargando" });
+  const headers = { Authorization: `Bearer ${token}` };
+
+  async function llamar<T>(url: string, init?: RequestInit): Promise<T> {
+    const res = await fetch(url, { ...init, headers });
+    const datos = await res.json();
+    if (!res.ok) throw new Error(datos.error ?? `Error ${res.status}`);
+    return datos as T;
+  }
+
+  async function actualizar() {
+    setOcupado(true);
+    setError(null);
     try {
-      const res = await fetch("/api/comprobantes", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const datos = await res.json();
-      if (res.ok) setEstado({ tipo: "ok", objeto: datos.objeto, cuerpo: datos.comprobante });
-      else setEstado({ tipo: "error", mensaje: datos.error ?? `Error ${res.status}` });
-    } catch {
-      setEstado({ tipo: "error", mensaje: "No se pudo contactar al servidor. Revisa tu conexión." });
+      const d = await llamar<{ items: Item[] }>("/api/comprobantes");
+      setItems(d.items);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo contactar al servidor. Revisa tu conexión.");
+    } finally {
+      setOcupado(false);
     }
   }
+
+  async function crear() {
+    setOcupado(true);
+    setError(null);
+    try {
+      const d = await llamar<Detalle>("/api/comprobantes", { method: "POST" });
+      setDetalle({ objeto: d.objeto, comprobante: d.comprobante });
+      const lista = await llamar<{ items: Item[] }>("/api/comprobantes");
+      setItems(lista.items);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo contactar al servidor. Revisa tu conexión.");
+    } finally {
+      setOcupado(false);
+    }
+  }
+
+  async function ver(id: string) {
+    setOcupado(true);
+    setError(null);
+    try {
+      const d = await llamar<Detalle>(`/api/comprobantes?id=${encodeURIComponent(id)}`);
+      setDetalle({ objeto: d.objeto, comprobante: d.comprobante });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo contactar al servidor. Revisa tu conexión.");
+    } finally {
+      setOcupado(false);
+    }
+  }
+
+  const sinToken = token.length === 0;
 
   return (
     <>
       <span className="etiqueta-demo">Datos de demostración</span>
       <h1>Comprobantes de prueba</h1>
       <p>
-        Crea un comprobante sintético. El servidor lo guarda en Cloud Storage y lo vuelve a leer
-        desde el bucket para confirmar que funcionó.
+        Cada comprobante es un archivo en un bucket privado de Cloud Storage. Crea uno, recarga la
+        página, escribe el token y pulsa “Actualizar lista”: el comprobante sigue ahí.
       </p>
-      <label htmlFor="token">Token de la demo</label>
-      <input
-        id="token"
-        type="password"
-        autoComplete="off"
-        value={token}
-        onChange={(e) => setToken(e.target.value)}
-      />
-      <button onClick={crear} disabled={estado.tipo === "cargando" || token.length === 0}>
-        {estado.tipo === "cargando" ? "Guardando…" : "Crear comprobante de prueba"}
-      </button>
+      {sinToken && <p className="aviso">Escribe el token de la demo en la parte superior para empezar.</p>}
+
+      <div className="acciones">
+        <button onClick={crear} disabled={ocupado || sinToken}>
+          {ocupado ? "Trabajando…" : "Crear comprobante de prueba"}
+        </button>
+        <button className="secundario" onClick={actualizar} disabled={ocupado || sinToken}>
+          Actualizar lista
+        </button>
+      </div>
 
       <div aria-live="polite">
-        {estado.tipo === "ok" && (
-          <div className="resultado ok">
-            <strong>Comprobante guardado y leído desde el bucket.</strong>
-            <p>Objeto: <code>{estado.objeto}</code></p>
-            <pre>{JSON.stringify(estado.cuerpo, null, 2)}</pre>
-          </div>
-        )}
-        {estado.tipo === "error" && (
+        {error && (
           <div className="resultado error">
-            <strong>No se pudo crear el comprobante.</strong>
-            <p>{estado.mensaje}</p>
+            <strong>No se pudo completar la acción.</strong>
+            <p>{error}</p>
           </div>
         )}
+        {detalle && <Recibo c={detalle.comprobante} objeto={detalle.objeto} />}
       </div>
+
+      {items && (
+        <>
+          <h2>Guardados en el bucket</h2>
+          {items.length === 0 ? (
+            <p>Todavía no hay comprobantes. Crea el primero con el botón de arriba.</p>
+          ) : (
+            <div className="tabla-scroll">
+              <table>
+                <thead>
+                  <tr><th>Fecha (Guatemala)</th><th>Identificador</th><th>Tamaño</th><th><span className="solo-lector">Acción</span></th></tr>
+                </thead>
+                <tbody>
+                  {items.map((i) => (
+                    <tr key={i.id}>
+                      <td>{fechaGT(i.creado)}</td>
+                      <td><code>{i.id.slice(0, 8)}…</code></td>
+                      <td>{i.bytes} B</td>
+                      <td><button className="secundario chico" onClick={() => ver(i.id)} disabled={ocupado}>Ver</button></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
+      )}
     </>
   );
 }

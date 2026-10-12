@@ -57,7 +57,7 @@ Para leer el token y usarlo en la pantalla: `gcloud secrets versions access late
 ```bash
 gcloud run deploy asistente-negocios --source . --region $REGION \
   --service-account $SA@$PROJECT_ID.iam.gserviceaccount.com \
-  --set-env-vars GOOGLE_CLOUD_PROJECT=$PROJECT_ID,GCS_BUCKET=$BUCKET \
+  --set-env-vars GOOGLE_CLOUD_PROJECT=$PROJECT_ID,GOOGLE_CLOUD_LOCATION=$REGION,GCS_BUCKET=$BUCKET \
   --set-secrets DEMO_TOKEN=demo-token:latest \
   --min-instances 0 --max-instances 2 --allow-unauthenticated
 ```
@@ -77,6 +77,13 @@ curl -X POST $URL/api/comprobantes        # 401 (sin token)
 gcloud storage ls gs://$BUCKET/comprobantes-demo/   # el objeto aparece
 gcloud logging read 'resource.type="cloud_run_revision" AND textPayload!=""' --limit 5
 ```
+
+Todo lo anterior (pruebas 1 a 7) se puede ejecutar de una vez con el script del proyecto, en Cloud Shell y desde la carpeta que contiene `package.json`:
+
+```bash
+URL=$URL BUCKET=$BUCKET bash scripts/verificar-m2.sh
+```
+Pide el token sin mostrarlo y termina con `RESULTADO: todas las pruebas pasaron` si todo funciona. Guarda esa salida como evidencia.
 
 ## 8. Evidencias a guardar (sin secretos)
 
